@@ -1,0 +1,32 @@
+# docker compose up --build
+#   1. local   generates the synthetic landing zone and runs it through the pandas reference engine
+#   2. spark   runs the same landing files through PySpark + Delta Lake into ./data/spark_lake
+name: medallion-lakehouse
+
+x-app: &app
+  build: .
+  image: medallion-lakehouse:latest
+  volumes:
+    - ./data:/app/data
+  environment:
+    PII_HASH_SALT: ${PII_HASH_SALT:-demo-salt-not-for-production}
+
+services:
+  local:
+    <<: *app
+    entrypoint: ["sh", "-c"]
+    command:
+      - >
+        python -m lakehouse generate &&
+        rm -rf data/lake && python -m lakehouse run &&
+        python -m lakehouse report --out data/report &&
+        python -m lakehouse summary
+
+  spark:
+    <<: *app
+    depends_on:
+      local:
+        condition: service_completed_successfully
+    entrypoint: ["sh", "-c"]
+    command:
+      - rm -rf data/spark_lake && python -m lakehouse spark

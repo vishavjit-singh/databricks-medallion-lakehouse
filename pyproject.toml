@@ -1,0 +1,21 @@
+[project]
+name = "databricks-medallion-lakehouse"
+version = "1.0.0"
+description = "Bronze/silver/gold lakehouse on PySpark + Delta Lake with data-quality gates, SCD2 merges and column-level PII masking."
+authors = [{ name = "Vishavjit Singh Saini" }]
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+markers = ["spark: needs pyspark, delta-spark and a JVM (runs in the spark workflow)"]
+addopts = "-m 'not spark'"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]

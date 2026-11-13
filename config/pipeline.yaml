@@ -1,0 +1,101 @@
+# Medallion lakehouse configuration: one file drives both engines (pandas reference + PySpark/Delta).
+# Everything here describes SYNTHETIC data produced by lakehouse/generator.py.
+
+paths:
+  landing: data/landing          # raw drops: <entity>/<yyyy-mm-dd>/<file>
+  lake: data/lake                # bronze/ silver/ gold/ tables (local engine)
+  spark_lake: data/spark_lake    # Delta tables written by the Spark engine
+  reports: docs/images
+
+generator:
+  seed: 11
+  start_date: "2026-11-01"
+  days: 5
+  customers: 800
+  merchants: 60
+  transactions_per_day: 1800
+
+# Static demo FX rates used to conform amounts to INR (illustrative, not market data).
+fx_to_inr:
+  INR: 1.0
+  USD: 84.0
+  EUR: 90.0
+
+entities:
+  customers:
+    format: csv
+    primary_key: customer_id
+    order_by: updated_at
+    write_mode: scd2                       # silver keeps full history (valid_from / valid_to / is_current)
+    tracked_columns: [email, phone, city, kyc_tier]
+    schema:
+      customer_id: string
+      full_name: string
+      email: string
+      phone: string
+      date_of_birth: date
+      city: string
+      country: string
+      kyc_tier: string
+      signup_date: date
+      updated_at: timestamp
+    rules:
+      - {name: customer_id_not_null, type: not_null, column: customer_id}
+      - {name: email_format, type: regex, column: email, pattern: '^[^@\s]+@[^@\s]+\.[a-z]{2,}$'}
+      - {name: kyc_tier_allowed, type: accepted_values, column: kyc_tier, values: [basic, standard, premium]}
+    gate:
+      max_failure_rate: 0.10                 # daily deltas are small (~60 rows), so one bad row is ~2%
+
+  merchants:
+    format: csv
+    primary_key: merchant_id
+    order_by: updated_at
+    write_mode: upsert
+    schema:
+      merchant_id: string
+      merchant_name: string
+      category: string
+      city: string
+      updated_at: timestamp
+    rules:
+      - {name: merchant_id_not_null, type: not_null, column: merchant_id}
+      - {name: category_not_null, type: not_null, column: category}
+    gate:
+      max_failure_rate: 0.05
+
+  transactions:
+    format: jsonl
+    primary_key: txn_id
+    order_by: updated_at
+    write_mode: upsert                     # status updates (refunds) arrive as newer versions of a txn_id
+    schema:
+      txn_id: string
+      customer_id: string
+      merchant_id: string
+      amount: decimal
+      currency: string
+      status: string
+      channel: string
+      txn_ts: timestamp
+      updated_at: timestamp
+    rules:
+      - {name: txn_id_not_null, type: not_null, column: txn_id}
+      - {name: amount_positive, type: range, column: amount, min: 0.01, max: 500000}
+      - {name: currency_supported, type: accepted_values, column: currency, values: [INR, USD, EUR]}
+      - {name: status_allowed, type: accepted_values, column: status, values: [captured, refunded, failed]}
+      - {name: customer_exists, type: foreign_key, column: customer_id, references: customers.customer_id}
+      - {name: merchant_exists, type: foreign_key, column: merchant_id, references: merchants.merchant_id}
+    gate:
+      max_failure_rate: 0.05
+
+# Column-level PII policy. Silver is the restricted zone and keeps raw values;
+# every gold table and the masked silver view apply these rules.
+pii:
+  salt_env: PII_HASH_SALT                 # Databricks: a secret scope backed by Key Vault
+  demo_salt: demo-salt-not-for-production
+  reader_group: pii_readers               # Unity Catalog group allowed to see raw values
+  columns:
+    customers.full_name: {method: redact}
+    customers.email: {method: hash}
+    customers.phone: {method: mask_last4}
+    customers.date_of_birth: {method: year_only}

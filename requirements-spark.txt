@@ -1,0 +1,7 @@
+# Spark + Delta engine (docker compose, the spark workflow, local runs with Java 17)
+-r requirements.txt
+pyspark==3.5.3
+delta-spark==3.2.1
+# PySpark 3.5 is tested against pandas 2.x / NumPy 1.x
+pandas>=2.2,<3
+numpy>=1.26,<2
